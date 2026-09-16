@@ -100,6 +100,8 @@ namespace projects {
       Real dipoleXOffset;
       Real dipoleYOffset;
       Real dipoleZOffset;
+      
+      Real shellRadius;
 
       Real zeroOutComponents[3]; //0->x,1->y,2->z
 
