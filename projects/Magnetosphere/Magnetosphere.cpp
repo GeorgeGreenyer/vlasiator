@@ -81,15 +81,20 @@ namespace projects {
       RP::add<Real>("Magnetosphere.dipoleInflowBZ","Inflow magnetic field Bz component to which the vector potential dipole converges. Default is none.", this->dipoleInflowB[2],0.0);
 
       //GG 28.5.26: Adding dipole offset code. Assuming SI units + guessing what the params will be named in cfg
-      RP::add<Real>("Magnetosphere.dipoleXOffset", "Distance of dipole from centre position in x. Default is none.", this->dipoleXOffset, 0.0);
-      RP::add<Real>("Magnetosphere.dipoleYOffset", "Distance of dipole from centre position in y. Default is none.", this->dipoleYOffset, 0.0);
-      RP::add<Real>("Magnetosphere.dipoleZOffset", "Distance of dipole from centre position in z. Default is none.", this->dipoleZOffset, 0.0);
+      RP::add<Real>("Magnetosphere.dipoleXOffset", "Distance of dipole from centre position in x. Default is zero [m].", this->dipoleXOffset, 0.0);
+      RP::add<Real>("Magnetosphere.dipoleYOffset", "Distance of dipole from centre position in y. Default is zero [m].", this->dipoleYOffset, 0.0);
+      RP::add<Real>("Magnetosphere.dipoleZOffset", "Distance of dipole from centre position in z. Default is zero [m].", this->dipoleZOffset, 0.0);
 
 
       //New Parameter for zeroing out derivativeNew Parameter for zeroing out derivativess
       RP::add<Real>("Magnetosphere.zeroOutDerivativesX","Zero Out Perpendicular components", this->zeroOutComponents[0],1.0);
       RP::add<Real>("Magnetosphere.zeroOutDerivativesY","Zero Out Perpendicular components", this->zeroOutComponents[1],1.0);
       RP::add<Real>("Magnetosphere.zeroOutDerivativesZ","Zero Out Perpendicular components", this->zeroOutComponents[2],1.0);
+
+
+      //GG 08.09.26: Adding Resistive shell geometry
+      RP::add<Real>("Shell.shellRadius", "Outer radius of resistive region. Default is 1R_M [m].", P::shellRadius, 2.4397e6);  //1R_M as this is smaller than 1R_E so will default do nothing in Earth case
+
 
       // Per-population parameters
       for(uint i=0; i< getObjectWrapper().particleSpecies.size(); i++) {

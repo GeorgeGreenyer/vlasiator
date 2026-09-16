@@ -863,6 +863,7 @@ inline REAL JXB(fsgrids::ehall term, const std::array<REAL, Rec::N_REC_COEFFICIE
  * \sa calculateHallTerm JXBX_000_100 JXBX_001_101 JXBX_010_110 JXBX_011_111
  *
  */
+/*
 void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
                                      fsgrids::ehallspan ehalls,
                                      fsgrids::constmomentsspan moments,
@@ -871,6 +872,15 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
                                      const std::array<Real, 3>& gridSpacing,
                                      const std::array<Real, Rec::N_REC_COEFFICIENTS>& perturbedCoefficients,
                                      const fsgrid::FsStencil& stencil) {
+*/
+void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
+                                    fsgrids::ehallspan ehalls,
+                                    fsgrids::constmomentsspan moments,
+                                    fsgrids::constdperbspan dperbs,
+                                    fsgrids::constbgbspan bgbs,
+                                    const std::array<Real, 3>& gridSpacing,
+                                    const std::array<Real, Rec::N_REC_COEFFICIENTS>& perturbedCoefficients,
+                                    const fsgrid::FsStencil& stencil, const std::array<Real, 3>& physicalCoords) {
    const auto ooo = stencil.ooo();
    const auto& bgb = bgbs[ooo];
    const auto& perb = perbs[ooo];
@@ -882,16 +892,41 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
    const Real bgby = bgb[fsgrids::bgbfield::BGBY];
    const Real bgbz = bgb[fsgrids::bgbfield::BGBZ];
 
-   auto computeHallRhoq = [&moments, &moment](const std::array<size_t, 4>& indices) {
+   auto computeHallRhoq = [&moments, &moment](const std::array<size_t, 4>& indices, &physicalCoords) {
       const auto min = Parameters::hallMinimumRhoq;
       const auto max = std::numeric_limits<Real>::max();
-
+      //Fetch per-cell data to check position with each solve? Sounds expensive
+      //Look up these functions to see if any can actually retrieve position of arbitrary cell
+      //There's also cellID but would have to iterate through all cellIds to find appropriate ones.
+      //Not sure if this will access data per-cell without cellID, so need to figure out how the cell indexing interacts with this function
+      //double position = SpatialCell.x^2+cell_at_location.y^2+CellParams.z^2
+      
+      
+      """
       return std::clamp(
           Parameters::ohmHallTerm == 1
               ? moment[fsgrids::moments::RHOQ]
               : FOURTH * (moments[indices[0]][fsgrids::moments::RHOQ] + moments[indices[1]][fsgrids::moments::RHOQ] +
                           moments[indices[2]][fsgrids::moments::RHOQ] + moments[indices[3]][fsgrids::moments::RHOQ]),
           min, max);
+      """
+         //bro what position am I using here
+         //GG14.9.26 probably not how this works, check the param structure of computeHallRhoq and calculateEdgeHallTerm
+         Real position = pow(physicalCoords[0],2) + pow(physicalCoords[1],2) + pow(physicalCoords[2],2)
+         if(std::pow(projects::shellRadius,2)>position) {
+            return max;
+            //Return ludicrous rhoq moment ~10^308 (if Real is a 64double) 
+
+         }
+         else{
+            return std::clamp(
+            Parameters::ohmHallTerm == 1
+               ? moment[fsgrids::moments::RHOQ]
+               : FOURTH * (moments[indices[0]][fsgrids::moments::RHOQ] + moments[indices[1]][fsgrids::moments::RHOQ] +
+                           moments[indices[2]][fsgrids::moments::RHOQ] + moments[indices[3]][fsgrids::moments::RHOQ]),
+            min, max);
+         }
+          
    };
 
    switch (Parameters::ohmHallTerm) {
@@ -1057,6 +1092,7 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
  *
  * \sa calculateHallTermSimple calculateEdgeHallTermComponents
  */
+/*
 void calculateHallTerm(fsgrids::perbspan perb,
                        fsgrids::ehallspan ehall,
                        fsgrids::constmomentsspan moments,
@@ -1064,6 +1100,14 @@ void calculateHallTerm(fsgrids::perbspan perb,
                        fsgrids::constbgbspan bgb,
                        fsgrids::consttechnicalspan technical, const fsgrid::FsStencil& stencil,
                        SysBoundary& sysBoundaries, const std::array<Real, 3>& gridSpacing) {
+*/
+void calculateHallTerm(fsgrids::perbspan perb,
+                       fsgrids::ehallspan ehall,
+                       fsgrids::constmomentsspan moments,
+                       fsgrids::constdperbspan dperb,
+                       fsgrids::constbgbspan bgb,
+                       fsgrids::consttechnicalspan technical, const fsgrid::FsStencil& stencil,
+                       SysBoundary& sysBoundaries, const std::array<Real, 3>& gridSpacing, const std::array<Real, 3>& physicalCoords) {
 #ifdef DEBUG_FSOLVER
    if (!stencil.cellExists(0, 0, 0)) {
       cerr << "Out-of-bounds access in " << __FILE__ << ":" << __LINE__ << endl;
@@ -1074,6 +1118,7 @@ void calculateHallTerm(fsgrids::perbspan perb,
    const auto& tech = technical[stencil.ooo()];
    cuint cellSysBoundaryFlag = tech.sysBoundaryFlag;
    cuint cellSysBoundaryLayer = tech.sysBoundaryLayer;
+   
 
    if (cellSysBoundaryFlag == sysboundarytype::DO_NOT_COMPUTE ||
        cellSysBoundaryFlag == sysboundarytype::OUTER_BOUNDARY_PADDING) {
@@ -1091,7 +1136,10 @@ void calculateHallTerm(fsgrids::perbspan perb,
       sb->fieldSolverBoundaryCondHallElectricField(ehall, stencil, 1);
       sb->fieldSolverBoundaryCondHallElectricField(ehall, stencil, 2);
    } else {
-      calculateEdgeHallTermComponents(perb, ehall, moments, dperb, bgb, gridSpacing, perturbedCoefficients, stencil);
+      //calculateEdgeHallTermComponents(perb, ehall, moments, dperb, bgb, gridSpacing, perturbedCoefficients, stencil);
+      //GG14.9.26 Testing coordinates.getPhysicalCoords to check resistive shell against
+      calculateEdgeHallTermComponents(perb, ehall, moments, dperb, bgb, gridSpacing, perturbedCoefficients, stencil, physicalCoords);
+
    }
 }
 
@@ -1149,7 +1197,10 @@ void calculateHallTermSimple(fsgrids::perbspan perb,
    fsgrid.parallel_for([](int timerId) -> phiprof::Timer { return phiprof::Timer{timerId}; },
                        phiprof::initializeTimer("EHall compute cells"), technical,
                        [=, &sysBoundaries](const fsgrid::Coordinates &coordinates, const fsgrid::FsStencil& stencil, cuint sysBoundaryFlag, cuint sysBoundaryLayer) {
-                          calculateHallTerm(perb, ehall, moments, dperb, bgb, technical, stencil, sysBoundaries, coordinates.physicalGridSpacing);
+                          //calculateHallTerm(perb, ehall, moments, dperb, bgb, technical, stencil, sysBoundaries, coordinates.physicalGridSpacing);
+                          //GG14.9.26 resistive shell stuff - add physical coords to hall term
+                          calculateHallTerm(perb, ehall, moments, dperb, bgb, technical, stencil, sysBoundaries, coordinates.physicalGridSpacing, coordinates.getPhysicalCoordinates(stencil.i, stencil.j, stencil.k));
+
                        });
 
    hallTimer.stop(numCells, "Spatial Cells");
