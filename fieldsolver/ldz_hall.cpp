@@ -902,30 +902,30 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
       //double position = SpatialCell.x^2+cell_at_location.y^2+CellParams.z^2
       
       
-      """
+      /*
       return std::clamp(
           Parameters::ohmHallTerm == 1
               ? moment[fsgrids::moments::RHOQ]
               : FOURTH * (moments[indices[0]][fsgrids::moments::RHOQ] + moments[indices[1]][fsgrids::moments::RHOQ] +
                           moments[indices[2]][fsgrids::moments::RHOQ] + moments[indices[3]][fsgrids::moments::RHOQ]),
           min, max);
-      """
-         //bro what position am I using here
-         //GG14.9.26 probably not how this works, check the param structure of computeHallRhoq and calculateEdgeHallTerm
-         Real position = pow(physicalCoords[0],2) + pow(physicalCoords[1],2) + pow(physicalCoords[2],2)
-         if(std::pow(projects::shellRadius,2)>position) {
-            return max;
-            //Return ludicrous rhoq moment ~10^308 (if Real is a 64double) 
+      */
+      //bro what position am I using here: physicalCoords needs out-check
+      //GG14.9.26 probably not how this works, check the param structure of computeHallRhoq and calculateEdgeHallTerm
+      Real position = (pow(physicalCoords[0],2) + pow(physicalCoords[1],2) + pow(physicalCoords[2],2));
+      if(std::pow(projects::shellRadius,2)>position) {
+         return max;
+         //Return ludicrous rhoq moment ~10^308 (if Real is a 64double) 
 
-         }
-         else{
-            return std::clamp(
-            Parameters::ohmHallTerm == 1
-               ? moment[fsgrids::moments::RHOQ]
-               : FOURTH * (moments[indices[0]][fsgrids::moments::RHOQ] + moments[indices[1]][fsgrids::moments::RHOQ] +
-                           moments[indices[2]][fsgrids::moments::RHOQ] + moments[indices[3]][fsgrids::moments::RHOQ]),
-            min, max);
-         }
+      }
+      else{
+         return std::clamp(
+         Parameters::ohmHallTerm == 1
+            ? moment[fsgrids::moments::RHOQ]
+            : FOURTH * (moments[indices[0]][fsgrids::moments::RHOQ] + moments[indices[1]][fsgrids::moments::RHOQ] +
+                        moments[indices[2]][fsgrids::moments::RHOQ] + moments[indices[3]][fsgrids::moments::RHOQ]),
+         min, max);
+      }
           
    };
 
@@ -1066,7 +1066,7 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
       };
 
       for (size_t index = 0; index < terms.size(); index++) {
-         ehall[terms[index]] = computeEHall(terms[index], computeHallRhoq(indices[index]));
+         ehall[terms[index]] = computeEHall(terms[index], computeHallRhoq(indices[index]), physicalCoords);
       }
 
       break;
