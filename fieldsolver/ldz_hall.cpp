@@ -892,7 +892,7 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
    const Real bgby = bgb[fsgrids::bgbfield::BGBY];
    const Real bgbz = bgb[fsgrids::bgbfield::BGBZ];
 
-   auto computeHallRhoq = [&moments, &moment](const std::array<size_t, 4>& indices, &physicalCoords) {
+   auto computeHallRhoq = [&moments, &moment](const std::array<size_t, 4>& indices, const std::array<Real, 3>& physicalCoords) {
       const auto min = Parameters::hallMinimumRhoq;
       const auto max = std::numeric_limits<Real>::max();
       //Fetch per-cell data to check position with each solve? Sounds expensive
@@ -913,7 +913,7 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
       //bro what position am I using here: physicalCoords needs out-check
       //GG14.9.26 probably not how this works, check the param structure of computeHallRhoq and calculateEdgeHallTerm
       Real position = (pow(physicalCoords[0],2) + pow(physicalCoords[1],2) + pow(physicalCoords[2],2));
-      if(std::pow(projects::shellRadius,2)>position) {
+      if(std::pow(projects::Magnetosphere::shellRadius,2)>position) {
          return max;
          //Return ludicrous rhoq moment ~10^308 (if Real is a 64double) 
 
@@ -940,7 +940,7 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
       const Real By = perb[fsgrids::bfield::PERBY] + bgby;
       const Real Bz = perb[fsgrids::bfield::PERBZ] + bgbz;
 
-      const Real invHallRhoqMU0 = 1.0 / (physicalconstants::MU_0 * computeHallRhoq({}));
+      const Real invHallRhoqMU0 = 1.0 / (physicalconstants::MU_0 * computeHallRhoq({}, physicalCoords));
 
       const Real ydx = (bgb[fsgrids::bgbfield::dBGBydx] + dperb[fsgrids::dperb::dPERBydx]) / gridSpacing[0];
       const Real zdx = (bgb[fsgrids::bgbfield::dBGBzdx] + dperb[fsgrids::dperb::dPERBzdx]) / gridSpacing[0];
@@ -1199,7 +1199,7 @@ void calculateHallTermSimple(fsgrids::perbspan perb,
                        [=, &sysBoundaries](const fsgrid::Coordinates &coordinates, const fsgrid::FsStencil& stencil, cuint sysBoundaryFlag, cuint sysBoundaryLayer) {
                           //calculateHallTerm(perb, ehall, moments, dperb, bgb, technical, stencil, sysBoundaries, coordinates.physicalGridSpacing);
                           //GG14.9.26 resistive shell stuff - add physical coords to hall term
-                          calculateHallTerm(perb, ehall, moments, dperb, bgb, technical, stencil, sysBoundaries, coordinates.physicalGridSpacing, coordinates.getPhysicalCoordinates(stencil.i, stencil.j, stencil.k));
+                          calculateHallTerm(perb, ehall, moments, dperb, bgb, technical, stencil, sysBoundaries, coordinates.physicalGridSpacing, coordinates.getPhysicalCoords(stencil.i, stencil.j, stencil.k));
 
                        });
 
