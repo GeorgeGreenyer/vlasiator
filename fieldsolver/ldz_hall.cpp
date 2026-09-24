@@ -913,7 +913,8 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
       //bro what position am I using here: physicalCoords needs out-check
       //GG14.9.26 probably not how this works, check the param structure of computeHallRhoq and calculateEdgeHallTerm
       Real position = (pow(physicalCoords[0],2) + pow(physicalCoords[1],2) + pow(physicalCoords[2],2));
-      if(std::pow(Parameters::shellRadius,2)>position) {
+      const Real resShellRadius = Parameters::shellRadius;
+      if(std::pow(resShellRadius, 2)>position) {
          return max;
          //Return ludicrous rhoq moment ~10^308 (if Real is a 64double) 
 
