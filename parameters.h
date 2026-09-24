@@ -273,6 +273,8 @@ struct Parameters {
    static std::string method_str;
    static ASTERIX_COMPRESSION_METHODS vdf_compression_method;
 
+   static Real shellRadius;
+
    static bool computeCurvature; /*<! Boolean flag, if true the curvature of magnetic field is computed. */
 
    /*! \brief Add the global parameters.
