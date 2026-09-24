@@ -93,7 +93,8 @@ namespace projects {
 
 
       //GG 08.09.26: Adding Resistive shell geometry
-      RP::add<Real>("Shell.shellRadius", "Outer radius of resistive region. Default is 1R_M [m].", this->shellRadius, 2.4397e6);  //1R_M as this is smaller than 1R_E so will default do nothing in Earth case
+      //24.09.26 moved to parameters for now
+      //RP::add<Real>("Shell.shellRadius", "Outer radius of resistive region. Default is 1R_M [m].", this->shellRadius, 2.4397e6);  //1R_M as this is smaller than 1R_E so will default do nothing in Earth case
 
 
       // Per-population parameters
