@@ -238,6 +238,17 @@ void feedMomentsIntoFsGrid(dccrg::Dccrg<SpatialCell, dccrg::Cartesian_Geometry>&
             auto& moment = moments[static_cast<size_t>(lid)];
             for (int l = 0; l < fsgrids::moments::N_MOMENTS; l++) {
                moment[l] = receiveBuffer[l];
+               //GG30.09.26 why doesn't he know about stencil, and what did yann mean when he said I could use technical and .ooo()
+               //when technical doesn't have a physical coords parameter and stencil doesn't exist in this scope. What am I missing/
+               const fsgrid::Cooordinates coordinates;
+               std::array<Real, 3> coords = coordinates.getPhysicalCoords(stencil.i, stencil.j, stencil.k)
+               Real position = std::inner_product(coords.begin(), coords.end(), coords.begin(), 0)
+               if (position <= Parameters::shellRadius){
+                  moment[2] = 0.0;  //VX0
+                  moment[3] = 0.0;  //VY0
+                  moment[4] = 0.0;  //Vz0
+
+               }
             }
          }
 

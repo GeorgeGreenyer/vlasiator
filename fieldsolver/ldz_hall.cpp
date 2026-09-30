@@ -895,12 +895,6 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
    auto computeHallRhoq = [&moments, &moment](const std::array<size_t, 4>& indices, const std::array<Real, 3>& physicalCoords) {
       const auto min = Parameters::hallMinimumRhoq;
       const auto max = std::numeric_limits<Real>::max();
-      //Fetch per-cell data to check position with each solve? Sounds expensive
-      //Look up these functions to see if any can actually retrieve position of arbitrary cell
-      //There's also cellID but would have to iterate through all cellIds to find appropriate ones.
-      //Not sure if this will access data per-cell without cellID, so need to figure out how the cell indexing interacts with this function
-      //double position = SpatialCell.x^2+cell_at_location.y^2+CellParams.z^2
-      
       
       /*
       return std::clamp(
@@ -911,7 +905,7 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
           min, max);
       */
       //bro what position am I using here: physicalCoords needs out-check
-      //GG14.9.26 probably not how this works, check the param structure of computeHallRhoq and calculateEdgeHallTerm
+      //GG 24.09.26 Compiles but needs checking
       Real position = (pow(physicalCoords[0],2) + pow(physicalCoords[1],2) + pow(physicalCoords[2],2));
       const Real resShellRadius = Parameters::shellRadius;
       if(std::pow(resShellRadius, 2)>position) {
