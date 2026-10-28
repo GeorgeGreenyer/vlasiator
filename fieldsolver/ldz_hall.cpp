@@ -906,9 +906,9 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
       */
       //bro what position am I using here: physicalCoords needs out-check
       //GG 24.09.26 Compiles but needs checking
-      Real position = (physicalCoords[0]*physicalCoords[0] + physicalCoords[1]*physicalCoords[1] + physicalCoords[2]*physicalCoords[2]);
-      const Real resShellRadius = Parameters::shellRadius;
-      if(resShellRadius*resShellRadius>position) {
+      Real position = std::sqrt(physicalCoords[0]*physicalCoords[0] + physicalCoords[1]*physicalCoords[1] + physicalCoords[2]*physicalCoords[2]);
+      const Real shellRadius = Parameters::shellRadius;
+      if(position<=shellRadius) {
          return max;
          //Return ludicrous rhoq moment ~10^308 (if Real is a 64double) 
          //I also need to check that this is happening outside the copysphere

@@ -354,7 +354,7 @@ Limits getRhomLimits(const std::array<std::array<Real, fsgrids::moments::N_MOMEN
    };
 }
 
-Real pickProfile(const Real position){
+int pickProfile(const Real position){
    //GG27.10.26 return profile(resistivity, x,y,z,rhoq,mu_0,shellRadius, position, dperb, indices, spacing)
    //This is the fastest way to do this (see time_trials)
    const Real resShellRadius = Parameters::shellRadius;
