@@ -354,14 +354,46 @@ Limits getRhomLimits(const std::array<std::array<Real, fsgrids::moments::N_MOMEN
    };
 }
 
+Real pickProfile(const Real position){
+   //GG27.10.26 return profile(resistivity, x,y,z,rhoq,mu_0,shellRadius, position, dperb, indices, spacing)
+   //This is the fastest way to do this (see time_trials)
+   const Real resShellRadius = Parameters::shellRadius;
+   int profile_case =0;
+   if(position<=resShellRadius){
+      //Add named profiles eg "tapered", "uniform" in parameters?
+      profile_case=1;
+
+   }
+   return profile_case;
+
+
+}
+
+//GG add position check in here for where to change resistivity profile - needs coords and shellRadius
+//Can make a function that picks profiles for resistivity based on position, but that is a future problem
+//can add physicalCoords once calculateElectricField has it in each direction
 Real resistiveTerm(const auto& bgb, const auto& perb, const auto& dperb, Real rhoq, std::array<size_t, 2> indices,
-                   std::array<Real, 2> spacing) {
+                   std::array<Real, 2> spacing, Real position) {
    const auto x = bgb[fsgrids::bgbfield::BGBX] + perb[fsgrids::bfield::PERBX];
    const auto y = bgb[fsgrids::bgbfield::BGBY] + perb[fsgrids::bfield::PERBY];
    const auto z = bgb[fsgrids::bgbfield::BGBZ] + perb[fsgrids::bfield::PERBZ];
-
-   return Parameters::resistivity * sqrt(x * x + y * y + z * z) / rhoq / physicalconstants::MU_0 *
-          (dperb[indices[0]] / spacing[0] - dperb[indices[1]] / spacing[1]);
+   
+   //something with pickProfile here, need to write the profiles first tho
+   if(pickProfile(position)==0){
+      return Parameters::resistivity * sqrt(x * x + y * y + z * z) / rhoq / physicalconstants::MU_0 *
+            (dperb[indices[0]] / spacing[0] - dperb[indices[1]] / spacing[1]);
+   }
+   else if (pickProfile(position)==1)
+   {
+      return std::max();
+      //something ridiculous for now, and leaving this elif open so that we can add more profiles later
+   }
+   else{
+      std::cout<<"[CRITICAL] ldz_electric_field.cpp unknown and/or untested profile case for resistivity. Waaaaaa"<<std::endl;
+      std::abort();
+   }
+   
+   
 }
 
 struct UpwindField {
@@ -454,7 +486,7 @@ void calculateEdgeElectricFieldX(fsgrids::perbspan perb,
                                  fsgrids::constdmomentsspan dmoments,
                                  fsgrids::constbgbspan bgb,
                                  fsgrids::technicalspan technical, const fsgrid::FsStencil& stencil,
-                                 int32_t RKCase, const std::array<Real, 3>& gridSpacing) {
+                                 int32_t RKCase, fsgrid::Coordinates& coordinates) {
    fsdebugCheck(stencil, perb.size(), __FILE__, __LINE__);
 
    // An edge has four neighbouring spatial cells. Calculate
@@ -470,6 +502,11 @@ void calculateEdgeElectricFieldX(fsgrids::perbspan perb,
    const DataArrays nw{perb, dperb, moments, dmoments, bgb, ci.nw};
    const DataArrays ne{perb, dperb, moments, dmoments, bgb, ci.ne};
 
+   const std::array<Real, 3> gridSpacing = coordinates.physicalGridSpacing;
+   const std::array<Real, 3> physicalCoords = coordinates.getPhysicalCoords(stencil.i, stencil.j, stencil.k);
+   Real position = std::sqrt(physicalCoords[0]*physicalCoords[0] + physicalCoords[1]*physicalCoords[1] + physicalCoords[2]*physicalCoords[2]);
+   Real shellRadius = Parameters::shellRadius;
+   
    const auto rhomLimits = getRhomLimits({
        sw.moments,
        se.moments,
@@ -487,6 +524,10 @@ void calculateEdgeElectricFieldX(fsgrids::perbspan perb,
    const Real perBy_N = nw.perb[fsgrids::bfield::PERBY];
    Real Vy0 = sw.moments[fsgrids::moments::VY];
    Real Vz0 = sw.moments[fsgrids::moments::VZ];
+   if(position<=shellRadius){
+      Vy0=0.0;
+      Vz0=0.0;
+   }
 
    creal dBydx_S = sw.dperb[fsgrids::dperb::dPERBydx] + sw.bgb[fsgrids::bgbfield::dBGBydx];
    creal dBydz_S = sw.dperb[fsgrids::dperb::dPERBydz] + sw.bgb[fsgrids::bgbfield::dBGBydz];
@@ -525,6 +566,10 @@ void calculateEdgeElectricFieldX(fsgrids::perbspan perb,
    // Ex and characteristic speeds on SE neighbour:
    Vy0 = se.moments[fsgrids::moments::VY];
    Vz0 = se.moments[fsgrids::moments::VZ];
+   if(position<=shellRadius){
+      Vy0=0.0;
+      Vz0=0.0;
+   }
 
    // 1st order terms:
    Real Ex_SE = By_S * Vz0 - Bz_E * Vy0;
@@ -550,6 +595,10 @@ void calculateEdgeElectricFieldX(fsgrids::perbspan perb,
    // Ex and characteristic speeds on NW neighbour:
    Vy0 = nw.moments[fsgrids::moments::VY];
    Vz0 = nw.moments[fsgrids::moments::VZ];
+   if(position<=shellRadius){
+      Vy0=0.0;
+      Vz0=0.0;
+   }
 
    // 1st order terms:
    Real Ex_NW = By_N * Vz0 - Bz_W * Vy0;
@@ -575,6 +624,10 @@ void calculateEdgeElectricFieldX(fsgrids::perbspan perb,
    // Ex and characteristic speeds on NE neighbour:
    Vy0 = ne.moments[fsgrids::moments::VY];
    Vz0 = ne.moments[fsgrids::moments::VZ];
+   if(position<=shellRadius){
+      Vy0=0.0;
+      Vz0=0.0;
+   }
 
    // 1st order terms:
    Real Ex_NE = By_N * Vz0 - Bz_E * Vy0;
@@ -607,10 +660,10 @@ void calculateEdgeElectricFieldX(fsgrids::perbspan perb,
                                   static_cast<size_t>(fsgrids::dperb::dPERBydz)};
       const std::array spacing = {gridSpacing[1], gridSpacing[2]};
 
-      Ex_SW += resistiveTerm(sw.bgb, sw.perb, sw.dperb, sw.moments[fsgrids::moments::RHOQ], indices, spacing);
-      Ex_SE += resistiveTerm(se.bgb, se.perb, se.dperb, se.moments[fsgrids::moments::RHOQ], indices, spacing);
-      Ex_NW += resistiveTerm(nw.bgb, nw.perb, nw.dperb, nw.moments[fsgrids::moments::RHOQ], indices, spacing);
-      Ex_NE += resistiveTerm(ne.bgb, ne.perb, ne.dperb, ne.moments[fsgrids::moments::RHOQ], indices, spacing);
+      Ex_SW += resistiveTerm(sw.bgb, sw.perb, sw.dperb, sw.moments[fsgrids::moments::RHOQ], indices, spacing, position);
+      Ex_SE += resistiveTerm(se.bgb, se.perb, se.dperb, se.moments[fsgrids::moments::RHOQ], indices, spacing, position);
+      Ex_NW += resistiveTerm(nw.bgb, nw.perb, nw.dperb, nw.moments[fsgrids::moments::RHOQ], indices, spacing, position);
+      Ex_NE += resistiveTerm(ne.bgb, ne.perb, ne.dperb, ne.moments[fsgrids::moments::RHOQ], indices, spacing, position);
    }
 
    // Hall terms
@@ -677,7 +730,7 @@ void calculateEdgeElectricFieldY(fsgrids::perbspan perb,
                                  fsgrids::constdmomentsspan dmoments,
                                  fsgrids::constbgbspan bgb,
                                  fsgrids::technicalspan technical, const fsgrid::FsStencil& stencil,
-                                 int32_t RKCase, const std::array<Real, 3>& gridSpacing) {
+                                 int32_t RKCase, fsgrid::Coordinates& coordinates) {
    fsdebugCheck(stencil, perb.size(), __FILE__, __LINE__);
 
    // An edge has four neighbouring spatial cells. Calculate
@@ -692,6 +745,11 @@ void calculateEdgeElectricFieldY(fsgrids::perbspan perb,
    const DataArrays se{perb, dperb, moments, dmoments, bgb, ci.se};
    const DataArrays nw{perb, dperb, moments, dmoments, bgb, ci.nw};
    const DataArrays ne{perb, dperb, moments, dmoments, bgb, ci.ne};
+
+   const std::array<Real, 3> gridSpacing = coordinates.physicalGridSpacing;
+   const std::array<Real, 3> physicalCoords = coordinates.getPhysicalCoords(stencil.i, stencil.j, stencil.k);
+   Real position = std::sqrt(physicalCoords[0]*physicalCoords[0] + physicalCoords[1]*physicalCoords[1] + physicalCoords[2]*physicalCoords[2]);
+   Real shellRadius = Parameters::shellRadius;
 
    const auto rhomLimits = getRhomLimits({
        sw.moments,
@@ -710,6 +768,10 @@ void calculateEdgeElectricFieldY(fsgrids::perbspan perb,
    const Real perBz_N = nw.perb[fsgrids::bfield::PERBZ];
    Real Vx0 = sw.moments[fsgrids::moments::VX];
    Real Vz0 = sw.moments[fsgrids::moments::VZ];
+   if(position<=shellRadius){
+      Vz0=0.0;
+      Vx0=0.0;
+   }
 
    creal dBxdy_W = sw.dperb[fsgrids::dperb::dPERBxdy] + sw.bgb[fsgrids::bgbfield::dBGBxdy];
    creal dBxdz_W = sw.dperb[fsgrids::dperb::dPERBxdz] + sw.bgb[fsgrids::bgbfield::dBGBxdz];
@@ -749,6 +811,10 @@ void calculateEdgeElectricFieldY(fsgrids::perbspan perb,
    // Ey and characteristic speeds on SE neighbour:
    Vx0 = se.moments[fsgrids::moments::VX];
    Vz0 = se.moments[fsgrids::moments::VZ];
+   if(position<=shellRadius){
+      Vz0=0.0;
+      Vx0=0.0;
+   }
 
    // 1st order terms:
    Real Ey_SE = Bz_S * Vx0 - Bx_E * Vz0;
@@ -774,6 +840,10 @@ void calculateEdgeElectricFieldY(fsgrids::perbspan perb,
    // Ey and characteristic speeds on NW neighbour:
    Vz0 = nw.moments[fsgrids::moments::VZ];
    Vx0 = nw.moments[fsgrids::moments::VX];
+   if(position<=shellRadius){
+      Vz0=0.0;
+      Vx0=0.0;
+   }
 
    // 1st order terms:
    Real Ey_NW = Bz_N * Vx0 - Bx_W * Vz0;
@@ -799,6 +869,10 @@ void calculateEdgeElectricFieldY(fsgrids::perbspan perb,
    // Ey and characteristic speeds on NE neighbour:
    Vz0 = ne.moments[fsgrids::moments::VZ];
    Vx0 = ne.moments[fsgrids::moments::VX];
+   if(position<=shellRadius){
+      Vz0=0.0;
+      Vx0=0.0;
+   }
 
    // 1st order terms:
    Real Ey_NE = Bz_N * Vx0 - Bx_E * Vz0;
@@ -827,10 +901,10 @@ void calculateEdgeElectricFieldY(fsgrids::perbspan perb,
                                   static_cast<size_t>(fsgrids::dperb::dPERBzdx)};
       const std::array spacing = {gridSpacing[2], gridSpacing[0]};
 
-      Ey_SW += resistiveTerm(sw.bgb, sw.perb, sw.dperb, sw.moments[fsgrids::moments::RHOQ], indices, spacing);
-      Ey_SE += resistiveTerm(se.bgb, se.perb, se.dperb, se.moments[fsgrids::moments::RHOQ], indices, spacing);
-      Ey_NW += resistiveTerm(nw.bgb, nw.perb, nw.dperb, nw.moments[fsgrids::moments::RHOQ], indices, spacing);
-      Ey_NE += resistiveTerm(ne.bgb, ne.perb, ne.dperb, ne.moments[fsgrids::moments::RHOQ], indices, spacing);
+      Ey_SW += resistiveTerm(sw.bgb, sw.perb, sw.dperb, sw.moments[fsgrids::moments::RHOQ], indices, spacing, position);
+      Ey_SE += resistiveTerm(se.bgb, se.perb, se.dperb, se.moments[fsgrids::moments::RHOQ], indices, spacing, position);
+      Ey_NW += resistiveTerm(nw.bgb, nw.perb, nw.dperb, nw.moments[fsgrids::moments::RHOQ], indices, spacing, position);
+      Ey_NE += resistiveTerm(ne.bgb, ne.perb, ne.dperb, ne.moments[fsgrids::moments::RHOQ], indices, spacing, position);
    }
 
    // Hall terms
@@ -897,7 +971,7 @@ void calculateEdgeElectricFieldZ(fsgrids::perbspan perb,
                                  fsgrids::constdmomentsspan dmoments,
                                  fsgrids::constbgbspan bgb,
                                  fsgrids::technicalspan technical, const fsgrid::FsStencil& stencil,
-                                 int32_t RKCase, const std::array<Real, 3>& gridSpacing) {
+                                 int32_t RKCase, fsgrid::Coordinates& coordinates) {
    fsdebugCheck(stencil, perb.size(), __FILE__, __LINE__);
 
    // An edge has four neighbouring spatial cells. Calculate
@@ -912,6 +986,12 @@ void calculateEdgeElectricFieldZ(fsgrids::perbspan perb,
    const DataArrays se{perb, dperb, moments, dmoments, bgb, ci.se};
    const DataArrays nw{perb, dperb, moments, dmoments, bgb, ci.nw};
    const DataArrays ne{perb, dperb, moments, dmoments, bgb, ci.ne};
+
+   const std::array<Real, 3> gridSpacing = coordinates.physicalGridSpacing;
+   const std::array<Real, 3> physicalCoords = coordinates.getPhysicalCoords(stencil.i, stencil.j, stencil.k);
+   Real position = std::sqrt(physicalCoords[0]*physicalCoords[0] + physicalCoords[1]*physicalCoords[1] + physicalCoords[2]*physicalCoords[2]);
+   Real shellRadius = Parameters::shellRadius;
+
 
    const auto rhomLimits = getRhomLimits({
        sw.moments,
@@ -931,6 +1011,10 @@ void calculateEdgeElectricFieldZ(fsgrids::perbspan perb,
    const Real perBx_N = nw.perb[fsgrids::bfield::PERBX];
    Real Vx0 = sw.moments[fsgrids::moments::VX];
    Real Vy0 = sw.moments[fsgrids::moments::VY];
+   if(position<=shellRadius){
+      Vx0=0.0;
+      Vy0=0.0;
+   }
 
    creal dBxdy_S = sw.dperb[fsgrids::dperb::dPERBxdy] + sw.bgb[fsgrids::bgbfield::dBGBxdy];
    creal dBxdz_S = sw.dperb[fsgrids::dperb::dPERBxdz] + sw.bgb[fsgrids::bgbfield::dBGBxdz];
@@ -970,6 +1054,10 @@ void calculateEdgeElectricFieldZ(fsgrids::perbspan perb,
    // Ez and characteristic speeds on SE cell:
    Vx0 = se.moments[fsgrids::moments::VX];
    Vy0 = se.moments[fsgrids::moments::VY];
+   if(position<=shellRadius){
+      Vx0=0.0;
+      Vy0=0.0;
+   }
 
    // 1st order terms:
    Real Ez_SE = Bx_S * Vy0 - By_E * Vx0;
@@ -995,6 +1083,10 @@ void calculateEdgeElectricFieldZ(fsgrids::perbspan perb,
    // Ez and characteristic speeds on NW cell:
    Vx0 = nw.moments[fsgrids::moments::VX];
    Vy0 = nw.moments[fsgrids::moments::VY];
+   if(position<=shellRadius){
+      Vx0=0.0;
+      Vy0=0.0;
+   }
 
    // 1st order terms:
    Real Ez_NW = Bx_N * Vy0 - By_W * Vx0;
@@ -1020,6 +1112,10 @@ void calculateEdgeElectricFieldZ(fsgrids::perbspan perb,
    // Ez and characteristic speeds on NE cell:
    Vx0 = ne.moments[fsgrids::moments::VX];
    Vy0 = ne.moments[fsgrids::moments::VY];
+   if(position<=shellRadius){
+      Vx0=0.0;
+      Vy0=0.0;
+   }
 
    // 1st order terms:
    Real Ez_NE = Bx_N * Vy0 - By_E * Vx0;
@@ -1048,10 +1144,10 @@ void calculateEdgeElectricFieldZ(fsgrids::perbspan perb,
                                   static_cast<size_t>(fsgrids::dperb::dPERBxdy)};
       const std::array spacing = {gridSpacing[0], gridSpacing[1]};
 
-      Ez_SW += resistiveTerm(sw.bgb, sw.perb, sw.dperb, sw.moments[fsgrids::moments::RHOQ], indices, spacing);
-      Ez_SE += resistiveTerm(se.bgb, se.perb, se.dperb, se.moments[fsgrids::moments::RHOQ], indices, spacing);
-      Ez_NW += resistiveTerm(nw.bgb, nw.perb, nw.dperb, nw.moments[fsgrids::moments::RHOQ], indices, spacing);
-      Ez_NE += resistiveTerm(ne.bgb, ne.perb, ne.dperb, ne.moments[fsgrids::moments::RHOQ], indices, spacing);
+      Ez_SW += resistiveTerm(sw.bgb, sw.perb, sw.dperb, sw.moments[fsgrids::moments::RHOQ], indices, spacing, position);
+      Ez_SE += resistiveTerm(se.bgb, se.perb, se.dperb, se.moments[fsgrids::moments::RHOQ], indices, spacing, position);
+      Ez_NW += resistiveTerm(nw.bgb, nw.perb, nw.dperb, nw.moments[fsgrids::moments::RHOQ], indices, spacing, position);
+      Ez_NE += resistiveTerm(ne.bgb, ne.perb, ne.dperb, ne.moments[fsgrids::moments::RHOQ], indices, spacing, position);
    }
 
    // Hall terms
@@ -1118,7 +1214,7 @@ void calculateElectricField(fsgrids::perbspan perb,
                             fsgrids::constdmomentsspan dmoments,
                             fsgrids::constbgbspan bgb,
                             fsgrids::technicalspan technical, const fsgrid::FsStencil& stencil,
-                            const std::array<Real, 3>& gridSpacing, SysBoundary& sysBoundaries, int32_t RKCase) {
+                            fsgrid::Coordinates &coordinates, SysBoundary& sysBoundaries, int32_t RKCase) {
    cuint cellSysBoundaryFlag = technical[stencil.ooo()].sysBoundaryFlag;
    cuint bitfield = technical[stencil.ooo()].SOLVE;
 
@@ -1126,24 +1222,24 @@ void calculateElectricField(fsgrids::perbspan perb,
        cellSysBoundaryFlag == sysboundarytype::OUTER_BOUNDARY_PADDING) {
       return;
    }
-
+   //add physicalCoords in here and do all corrections per direction
    if ((bitfield & compute::EX) == compute::EX) {
       calculateEdgeElectricFieldX(perb, dperb, e, ehall, egradpe, moments, dmoments, bgb, technical, stencil, RKCase,
-                                  gridSpacing);
+                                  &coordinates);
    } else {
       sysBoundaries.getSysBoundary(cellSysBoundaryFlag)->fieldSolverBoundaryCondElectricField(e, stencil, 0);
    }
 
    if ((bitfield & compute::EY) == compute::EY) {
       calculateEdgeElectricFieldY(perb, dperb, e, ehall, egradpe, moments, dmoments, bgb, technical, stencil, RKCase,
-                                  gridSpacing);
+                                  &coordinates);
    } else {
       sysBoundaries.getSysBoundary(cellSysBoundaryFlag)->fieldSolverBoundaryCondElectricField(e, stencil, 1);
    }
 
    if ((bitfield & compute::EZ) == compute::EZ) {
       calculateEdgeElectricFieldZ(perb, dperb, e, ehall, egradpe, moments, dmoments, bgb, technical, stencil, RKCase,
-                                  gridSpacing);
+                                  &coordinates);
    } else {
       sysBoundaries.getSysBoundary(cellSysBoundaryFlag)->fieldSolverBoundaryCondElectricField(e, stencil, 2);
    }
@@ -1227,7 +1323,7 @@ void calculateUpwindedElectricFieldSimple(fsgrids::perbspan perb,
                        phiprof::initializeTimer("Electric field compute cells"), technical,
                        [=, &sysBoundaries](const fsgrid::Coordinates &coordinates, const fsgrid::FsStencil& stencil, cuint sysBoundaryFlag, cuint sysBoundaryLayer) {
                           calculateElectricField(perb, dperb, e, ehall, egradpe, moments, dmoments, bgb, technical, stencil,
-                                                 coordinates.physicalGridSpacing, sysBoundaries, RKCase);
+                                                 &coordinates, sysBoundaries, RKCase);
                        });
 
    mpiTimer.start();

@@ -906,11 +906,12 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
       */
       //bro what position am I using here: physicalCoords needs out-check
       //GG 24.09.26 Compiles but needs checking
-      Real position = (pow(physicalCoords[0],2) + pow(physicalCoords[1],2) + pow(physicalCoords[2],2));
+      Real position = (physicalCoords[0]*physicalCoords[0] + physicalCoords[1]*physicalCoords[1] + physicalCoords[2]*physicalCoords[2]);
       const Real resShellRadius = Parameters::shellRadius;
-      if(std::pow(resShellRadius, 2)>position) {
+      if(resShellRadius*resShellRadius>position) {
          return max;
          //Return ludicrous rhoq moment ~10^308 (if Real is a 64double) 
+         //I also need to check that this is happening outside the copysphere
 
       }
       else{
@@ -1194,6 +1195,7 @@ void calculateHallTermSimple(fsgrids::perbspan perb,
                        [=, &sysBoundaries](const fsgrid::Coordinates &coordinates, const fsgrid::FsStencil& stencil, cuint sysBoundaryFlag, cuint sysBoundaryLayer) {
                           //calculateHallTerm(perb, ehall, moments, dperb, bgb, technical, stencil, sysBoundaries, coordinates.physicalGridSpacing);
                           //GG14.9.26 resistive shell stuff - add physical coords to hall term
+                          //These coords are fine? But will they be the same as the ones in ldz_hall or gridGlue?
                           calculateHallTerm(perb, ehall, moments, dperb, bgb, technical, stencil, sysBoundaries, coordinates.physicalGridSpacing, coordinates.getPhysicalCoords(stencil.i, stencil.j, stencil.k));
 
                        });

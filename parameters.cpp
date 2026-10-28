@@ -589,7 +589,7 @@ bool P::addParameters() {
    RP::add<std::size_t>("Asterix.max_vdfs_per_nn",string("Max vdfs per MLP in multi regression mode"),P::max_vdfs_per_nn,std::numeric_limits<std::size_t>::max());
 
    //GG 24.09.26
-   RP::add<Real>("Shell.shellRadius", "Outer radius of resistive region. Default is 1R_M [m].", P::shellRadius, 2.4397e6);
+   RP::add<Real>("shell.shellRadius", "Outer radius of resistive region. Default is 1R_M [m].", P::shellRadius, 2.4397e6);
    return true;
 }
 
