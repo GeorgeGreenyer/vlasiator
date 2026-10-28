@@ -385,7 +385,7 @@ Real resistiveTerm(const auto& bgb, const auto& perb, const auto& dperb, Real rh
    }
    else if (pickProfile(position)==1)
    {
-      return std::max();
+      return std::numeric_limits<Real>::max();
       //something ridiculous for now, and leaving this elif open so that we can add more profiles later
    }
    else{
@@ -486,7 +486,7 @@ void calculateEdgeElectricFieldX(fsgrids::perbspan perb,
                                  fsgrids::constdmomentsspan dmoments,
                                  fsgrids::constbgbspan bgb,
                                  fsgrids::technicalspan technical, const fsgrid::FsStencil& stencil,
-                                 int32_t RKCase, fsgrid::Coordinates& coordinates) {
+                                 int32_t RKCase, const fsgrid::Coordinates& coordinates) {
    fsdebugCheck(stencil, perb.size(), __FILE__, __LINE__);
 
    // An edge has four neighbouring spatial cells. Calculate
@@ -730,7 +730,7 @@ void calculateEdgeElectricFieldY(fsgrids::perbspan perb,
                                  fsgrids::constdmomentsspan dmoments,
                                  fsgrids::constbgbspan bgb,
                                  fsgrids::technicalspan technical, const fsgrid::FsStencil& stencil,
-                                 int32_t RKCase, fsgrid::Coordinates& coordinates) {
+                                 int32_t RKCase, const fsgrid::Coordinates& coordinates) {
    fsdebugCheck(stencil, perb.size(), __FILE__, __LINE__);
 
    // An edge has four neighbouring spatial cells. Calculate
@@ -971,7 +971,7 @@ void calculateEdgeElectricFieldZ(fsgrids::perbspan perb,
                                  fsgrids::constdmomentsspan dmoments,
                                  fsgrids::constbgbspan bgb,
                                  fsgrids::technicalspan technical, const fsgrid::FsStencil& stencil,
-                                 int32_t RKCase, fsgrid::Coordinates& coordinates) {
+                                 int32_t RKCase, const fsgrid::Coordinates& coordinates) {
    fsdebugCheck(stencil, perb.size(), __FILE__, __LINE__);
 
    // An edge has four neighbouring spatial cells. Calculate
@@ -1214,7 +1214,7 @@ void calculateElectricField(fsgrids::perbspan perb,
                             fsgrids::constdmomentsspan dmoments,
                             fsgrids::constbgbspan bgb,
                             fsgrids::technicalspan technical, const fsgrid::FsStencil& stencil,
-                            fsgrid::Coordinates &coordinates, SysBoundary& sysBoundaries, int32_t RKCase) {
+                            const fsgrid::Coordinates& coordinates, SysBoundary& sysBoundaries, int32_t RKCase) {
    cuint cellSysBoundaryFlag = technical[stencil.ooo()].sysBoundaryFlag;
    cuint bitfield = technical[stencil.ooo()].SOLVE;
 
@@ -1225,21 +1225,21 @@ void calculateElectricField(fsgrids::perbspan perb,
    //add physicalCoords in here and do all corrections per direction
    if ((bitfield & compute::EX) == compute::EX) {
       calculateEdgeElectricFieldX(perb, dperb, e, ehall, egradpe, moments, dmoments, bgb, technical, stencil, RKCase,
-                                  &coordinates);
+                                  coordinates);
    } else {
       sysBoundaries.getSysBoundary(cellSysBoundaryFlag)->fieldSolverBoundaryCondElectricField(e, stencil, 0);
    }
 
    if ((bitfield & compute::EY) == compute::EY) {
       calculateEdgeElectricFieldY(perb, dperb, e, ehall, egradpe, moments, dmoments, bgb, technical, stencil, RKCase,
-                                  &coordinates);
+                                  coordinates);
    } else {
       sysBoundaries.getSysBoundary(cellSysBoundaryFlag)->fieldSolverBoundaryCondElectricField(e, stencil, 1);
    }
 
    if ((bitfield & compute::EZ) == compute::EZ) {
       calculateEdgeElectricFieldZ(perb, dperb, e, ehall, egradpe, moments, dmoments, bgb, technical, stencil, RKCase,
-                                  &coordinates);
+                                  coordinates);
    } else {
       sysBoundaries.getSysBoundary(cellSysBoundaryFlag)->fieldSolverBoundaryCondElectricField(e, stencil, 2);
    }
@@ -1321,9 +1321,9 @@ void calculateUpwindedElectricFieldSimple(fsgrids::perbspan perb,
    // Calculate upwinded electric field
    fsgrid.parallel_for([](int timerId) -> phiprof::Timer { return phiprof::Timer{timerId}; },
                        phiprof::initializeTimer("Electric field compute cells"), technical,
-                       [=, &sysBoundaries](const fsgrid::Coordinates &coordinates, const fsgrid::FsStencil& stencil, cuint sysBoundaryFlag, cuint sysBoundaryLayer) {
+                       [=, &sysBoundaries](const fsgrid::Coordinates& coordinates, const fsgrid::FsStencil& stencil, cuint sysBoundaryFlag, cuint sysBoundaryLayer) {
                           calculateElectricField(perb, dperb, e, ehall, egradpe, moments, dmoments, bgb, technical, stencil,
-                                                 &coordinates, sysBoundaries, RKCase);
+                                                 coordinates, sysBoundaries, RKCase);
                        });
 
    mpiTimer.start();
