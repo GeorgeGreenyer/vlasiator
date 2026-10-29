@@ -904,8 +904,7 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
                           moments[indices[2]][fsgrids::moments::RHOQ] + moments[indices[3]][fsgrids::moments::RHOQ]),
           min, max);
       */
-      //bro what position am I using here: physicalCoords needs out-check
-      //GG 24.09.26 Compiles but needs checking
+      //GG29.10.26 compiles but does not run
       Real position = std::sqrt(physicalCoords[0]*physicalCoords[0] + physicalCoords[1]*physicalCoords[1] + physicalCoords[2]*physicalCoords[2]);
       const Real shellRadius = Parameters::shellRadius;
       if(position<=shellRadius) {
