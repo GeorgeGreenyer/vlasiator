@@ -904,13 +904,13 @@ void calculateEdgeHallTermComponents(fsgrids::perbspan perbs,
                           moments[indices[2]][fsgrids::moments::RHOQ] + moments[indices[3]][fsgrids::moments::RHOQ]),
           min, max);
       */
-      //GG29.10.26 compiles but does not run
+      
       Real position = std::sqrt(physicalCoords[0]*physicalCoords[0] + physicalCoords[1]*physicalCoords[1] + physicalCoords[2]*physicalCoords[2]);
       const Real shellRadius = Parameters::shellRadius;
       if(position<=shellRadius) {
          return max;
          //Return ludicrous rhoq moment ~10^308 (if Real is a 64double) 
-         //I also need to check that this is happening outside the copysphere
+         //I also need to check that this is happening outside the copysphere - something weird at AMR boundary maybe
 
       }
       else{
