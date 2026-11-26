@@ -31,6 +31,7 @@
 #include <stdint.h>
 #include <vector>
 #include <cmath>
+#include <utility>
 
 #include "../velocity_mesh_parameters.h"
 
@@ -263,8 +264,9 @@ namespace vmesh {
          auto it = globalToLocalMap.device_find(globalID);
          if (it != globalToLocalMap.device_end()) {
          #else
-         auto it = globalToLocalMap.find(globalID);
-         if (it != globalToLocalMap.end()) {
+         // Const lookup: the non-const find() may rehash, leaving this mesh's device copy with freed buckets.
+         auto it = std::as_const(globalToLocalMap).find(globalID);
+         if (it != std::as_const(globalToLocalMap).end()) {
          #endif
             const vmesh::GlobalID localID = it->second;
             if (localID != b) {
@@ -283,10 +285,6 @@ namespace vmesh {
          printf("VMESH CHECK ERROR Encountered %lu failures.\n",fail);
          return false;
       }
-      #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
-      localToGlobalMap.optimizeGPU(stream);
-      globalToLocalMap.optimizeGPU(stream);
-      #endif
       return ok;
    }
 
@@ -308,15 +306,11 @@ namespace vmesh {
          #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
          auto it = globalToLocalMap.device_find(globalID);
          #else
-         auto it = globalToLocalMap.find(globalID);
+         auto it = std::as_const(globalToLocalMap).find(globalID); // see check()
          #endif
          const vmesh::GlobalID localID = it->second;
          printf("vmesh LID [%6u] => GID [%6u] => [%6u]\n",b,globalID,localID);
       }
-      #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
-      localToGlobalMap.optimizeGPU(stream);
-      globalToLocalMap.optimizeGPU(stream);
-      #endif
    }
 
    inline void VelocityMesh::clear(bool shrink=true) {
@@ -324,8 +318,8 @@ namespace vmesh {
       if (shrink) {
          ltg_capacity = 1;
          gtl_sizepower = 4;
-         globalToLocalMap = Hashinator::Hashmap<vmesh::GlobalID,vmesh::LocalID>(ltg_capacity);
-         localToGlobalMap = split::SplitVector<vmesh::GlobalID>(gtl_sizepower);
+         globalToLocalMap = Hashinator::Hashmap<vmesh::GlobalID,vmesh::LocalID>(gtl_sizepower);
+         localToGlobalMap = split::SplitVector<vmesh::GlobalID>(ltg_capacity);
          localToGlobalMap.clear();
       } else {
          gpuStream_t stream = gpu_getStream();
@@ -676,7 +670,6 @@ namespace vmesh {
          }
          localToGlobalMap.insert(localToGlobalMap.end(),blocks.begin(),blocks.end());
          vmesh::GlobalID* _localToGlobalMapData = localToGlobalMap.data();
-         localToGlobalMap.optimizeGPU(stream);
          globalToLocalMap.insertIndex<false>(_localToGlobalMapData,blocksSize,0.5,stream);
          ltg_size = blocksSize;
          gtl_sizepower = globalToLocalMap.getSizePower();
@@ -701,7 +694,6 @@ namespace vmesh {
          localToGlobalMap.resize(ltg_size+newElements,true,stream);
          ltg_size += newElements;
          gtl_sizepower = globalToLocalMap.getSizePower();
-         localToGlobalMap.optimizeGPU(stream);
          return newElements;
       }
    }
@@ -744,7 +736,6 @@ namespace vmesh {
          }
          localToGlobalMap.insert(localToGlobalMap.end(),blocks->begin(),blocks->end());
          vmesh::GlobalID* _localToGlobalMapData = localToGlobalMap.data();
-         localToGlobalMap.optimizeGPU(stream);
          globalToLocalMap.insertIndex<false>(_localToGlobalMapData,blocksSize,0.5,stream);
          ltg_size = blocksSize;
          ltg_capacity = localToGlobalMap.capacity();
@@ -768,7 +759,6 @@ namespace vmesh {
             }
          }
          localToGlobalMap.resize(ltg_size+newElements,true,stream);
-         localToGlobalMap.optimizeGPU(stream);
          ltg_size += newElements;
          ltg_capacity = localToGlobalMap.capacity();
          gtl_sizepower = globalToLocalMap.getSizePower();

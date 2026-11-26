@@ -1,57 +1,44 @@
 #!/bin/bash
 #SBATCH -t 02:00:00        # Run time (hh:mm:ss)
-#SBATCH --job-name=CI_ukko_dgx
-#SBATCH -p gpu
-#SBATCH --constraint="v100"
-#SBATCH --gres="gpu:V100"
-#SBATCH -G 1
+#SBATCH --job-name=CI_turso-v100
+#SBATCH --gres=gpu:V100:1
 #SBATCH --cpus-per-task 10                 # CPU cores per task
 #SBATCH --hint=nomultithread
 #SBATCH --nodes=1
 #SBATCH -n 1                  # number of tasks
 #SBATCH --mem=40G
 
-#If 1, the reference vlsv files are generated
-# if 0 then we check the v1
+# If 1, the reference vlsv files are generated
+# if 0 then we check the v1 against reference files
 create_verification_files=0
 
 # folder for all reference data
 reference_dir="/turso/group/spacephysics/vlasiator/testpackage/"
 cd $SLURM_SUBMIT_DIR
 #cd $reference_dir # don't run on /proj
-#compare agains which revision
-reference_revision="CI_gpu_reference"
-#reference_revision="current"
 
 bin="$GITHUB_WORKSPACE/vlasiator"
 diffbin="$GITHUB_WORKSPACE/vlsvdiff_DP"
 
-export UCX_NET_DEVICES=eth0
-ulimit -c unlimited
-source ${GITHUB_WORKSPACE}/modules/ukko_dgx.sh
-
-nodes=$SLURM_NNODES
-t=$SLURM_CPUS_PER_TASK # used by TP script
-export OMP_NUM_THREADS=$t
-export tasks=$SLURM_NTASKS
-
-#command for running stuff
-run_command="srun --mpi=pmix -c $t -n $tasks"
-small_run_command="srun --mpi=pmix -c $t -n 1"
-run_command_tools="mpirun -n 1 -N 1"
+#compare agains which revision
+reference_revision="CI_gpu_reference"
+source ${GITHUB_WORKSPACE}/modules/turso-v100_GNU_MPICH.sh
 
 # send JOB ID to output usable by CI eg to scancel this job
 echo "SLURM_JOB_ID=$SLURM_JOB_ID" >> $GITHUB_OUTPUT
 
-# With this the code won't print the warning, so we have a shorter report
-export OMPI_MCA_io="^ompio"
+t=$SLURM_CPUS_PER_TASK
+export OMP_NUM_THREADS=$t
 
-# Abort on invalid jemalloc configuration parameters (not for GPU)
-# export MALLOC_CONF="abort_conf:true"
+#command for running stuff
+# MPICH here is PMIx-only (no Hydra), so no mpirun.
+run_command="srun --mpi=pmix -c $t -n $SLURM_NTASKS"
+small_run_command="srun --mpi=pmix -c $t -n 1"
+run_command_tools="srun --mpi=pmix -n 1"
 
 umask 007
 # Launch the OpenMP job to the allocated compute node
-echo "Running $exec on $tasks mpi tasks, with $t threads per task on $nodes nodes ($ht threads per physical core)"
+echo "Running $exec on $SLURM_NTASKS mpi tasks, with $t threads per task on $SLURM_NNODES nodes"
 
 # Print the used node
 hostname
@@ -83,10 +70,10 @@ test_dir=$( readlink -f $test_dir)
 
 flags=$(  $run_command $bin  --version |grep CXXFLAGS)
 solveropts=$(echo $flags|sed 's/[-+]//g' | gawk '{for(i = 1;i<=NF;i++) { if( $i=="DDP" || $i=="DFP" || index($i,"PF")|| index($i,"DVEC") || index($i,"SEMILAG") ) printf "__%s", $(i) }}')
-revision=$( $run_command $bin --version |gawk '{if(flag==1) {print $1;flag=0}if ($3=="log") flag=1;}' )
+revision=$( $small_run_command $bin --version |gawk '{if(flag==1) {print $1;flag=0}if ($3=="log") flag=1;}' )
 
 echo "----------"
-echo "This will be verifying ${run_dir}$/${revision}_${solveropts} against ${reference_revision_parsed}"
+echo "This will be verifying ${run_dir}/${revision}_${solveropts} against ${reference_revision_parsed}"
 echo "----------"
 
 #$small_run_command $bin --version > VERSION.txt 2> $GITHUB_WORKSPACE/stderr.txt
@@ -94,9 +81,49 @@ echo "----------"
 echo -e "### Testpackage output:\n" >> $GITHUB_STEP_SUMMARY
 echo "CI_reference pointed to $reference_revision_parsed" >> $GITHUB_STEP_SUMMARY
 
+# GitHub drops a step summary larger than 1 MiB, so it gets only the end of each log; testpackage_logs/ keeps them whole.
+summary_stdout_bytes=12000
+summary_stderr_bytes=6000
+summary_log() { # stream (stdout or stderr), byte limit, test name
+   local file=$GITHUB_WORKSPACE/$1.txt size
+   mkdir -p "$GITHUB_WORKSPACE/testpackage_logs"
+   cp "$file" "$GITHUB_WORKSPACE/testpackage_logs/$3.$1.txt"
+   size=$(stat -c %s "$file")
+   if (( size > $2 )); then
+      echo "[... first $(( size - $2 )) bytes left out here, full log in the testpackage-logs artifact ...]"
+   fi
+   tail -c "$2" "$file"
+}
+
 NONZEROTESTS=0
 ZEROTESTS=0
 FAILEDTESTS=0
+
+# Pushes and PRs run only this subset (TP_QUICK from github-ci.yml). Definition order is kept: restart_read needs restart_write's output.
+quick_tests="acctest_1_maxw_500k_100k_20kms_10deg acctest_2_maxw_500k_100k_20kms_10deg acctest_3_substeps
+   acctest_4_helium acctest_5_proton_antiproton Flowthrough_trans_periodic Flowthrough_x_inflow_y_outflow
+   Flowthrough_1D_timevarying Flowthrough_damr restart_write restart_read restart_write_acc restart_read_acc
+   subgrid_1_diffusion"
+if [[ $TP_QUICK == true ]]; then
+   declare -A quick
+   for name in $quick_tests; do
+      quick[$name]=1
+   done
+   selected=()
+   for run in "${run_tests[@]}"; do
+      if [[ ${quick[${test_name[$run]}]} ]]; then
+         selected+=("$run")
+         unset "quick[${test_name[$run]}]"
+      fi
+   done
+   echo "Quick subset: ${#selected[@]} of ${#run_tests[@]} tests. The weekly scheduled run covers all of them." >> $GITHUB_STEP_SUMMARY
+   for name in "${!quick[@]}"; do
+      echo ":red_circle: Quick-subset test $name is not defined in test_definitions_small.sh." >> $GITHUB_STEP_SUMMARY
+      FAILEDTESTS=$((FAILEDTESTS+1))
+      touch $GITHUB_WORKSPACE/testpackage_failed
+   done
+   run_tests=("${selected[@]}")
+fi
 
 # loop over different test cases
 for run in ${run_tests[*]}; do
@@ -136,9 +163,9 @@ for run in ${run_tests[*]}; do
    if [[ $RUN_ERROR != 0 ]]; then
       echo -e "<details><summary>:red_circle: ${test_name[$run]}: Failed to run or died with an error.</summary>\n"  >> $GITHUB_STEP_SUMMARY
       echo -e "Stdout:\n \`\`\`\n" >> $GITHUB_STEP_SUMMARY
-      cat $GITHUB_WORKSPACE/stdout.txt >> $GITHUB_STEP_SUMMARY
+      summary_log stdout $summary_stdout_bytes ${test_name[$run]} >> $GITHUB_STEP_SUMMARY
       echo -e "\`\`\`\nStderr:\n \`\`\`\n" >> $GITHUB_STEP_SUMMARY
-      cat $GITHUB_WORKSPACE/stderr.txt >> $GITHUB_STEP_SUMMARY
+      summary_log stderr $summary_stderr_bytes ${test_name[$run]} >> $GITHUB_STEP_SUMMARY
       echo -e "\`\`\`\n</details>" >> $GITHUB_STEP_SUMMARY
       FAILEDTESTS=$((FAILEDTESTS+1))
 
@@ -211,6 +238,7 @@ for run in ${run_tests[*]}; do
            continue
        fi
        echo "Comparing file ${vlsv_dir_short}/${vlsv} against reference"
+       timeDiff="" # the file time is the same for every variable, so any successful diff below supplies it
        COMPAREDFILES=$((COMPAREDFILES+1))
        echo $COMPAREDFILES > $RUNNER_TEMP/COMPAREDFILES.txt
 
@@ -219,14 +247,19 @@ for run in ${run_tests[*]}; do
            if [[ "${variables[$i]}" == "fg_"* ]]
            then
                A=$( $run_command_tools $diffbin --meshname=fsgrid  ${reference_result_dir}/${vlsv} ${vlsv_dir}/${vlsv} ${variables[$i]} ${indices[$i]} )
+               if [[ ! $? -eq 0 ]]; then
+                  RUN_ERROR=1
+                  touch $GITHUB_WORKSPACE/testpackage_failed
+               fi
+               dt=$(grep "The delta t between both datasets is" <<< "$A" | gawk '{print $8}'); timeDiff=${dt:-$timeDiff}
                relativeValue=$(grep "The relative 0-distance between both datasets" <<< $A |gawk '{print $8}'  )
                absoluteValue=$(grep "The absolute 0-distance between both datasets" <<< $A |gawk '{print $8}'  )
                #print the results
                echo -e " ${variables[$i]}_${indices[$i]}\t  ${absoluteValue}\t  ${relativeValue}" | expand -t $tabseq #list matches tabs above
 
                # Also log to metrics file
-               echo "test_ukko{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"absolute\"} $absoluteValue" >> $GITHUB_WORKSPACE/metrics.txt
-               echo "test_ukko{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"relative\"} $relativeValue" >> $GITHUB_WORKSPACE/metrics.txt
+               echo "test_turso_v100{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"absolute\"} $absoluteValue" >> $GITHUB_WORKSPACE/metrics.txt
+               echo "test_turso_v100{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"relative\"} $relativeValue" >> $GITHUB_WORKSPACE/metrics.txt
 
                # Check if we have a new maximum error
                if (( $( echo "$absoluteValue $MAXERR" | awk '{ if($1 > $2) print 1; else print 0 }' ) )); then
@@ -242,14 +275,19 @@ for run in ${run_tests[*]}; do
            elif [[ "${variables[$i]}" == "ig_"* ]]
            then
                B=$( $run_command_tools $diffbin --meshname=ionosphere  ${reference_result_dir}/${vlsv} ${vlsv_dir}/${vlsv} ${variables[$i]} ${indices[$i]} )
+               if [[ ! $? -eq 0 ]]; then
+                  RUN_ERROR=1
+                  touch $GITHUB_WORKSPACE/testpackage_failed
+               fi
+               dt=$(grep "The delta t between both datasets is" <<< "$B" | gawk '{print $8}'); timeDiff=${dt:-$timeDiff}
                relativeValue=$(grep "The relative 0-distance between both datasets" <<< $B |gawk '{print $8}'  )
                absoluteValue=$(grep "The absolute 0-distance between both datasets" <<< $B |gawk '{print $8}'  )
                # print the results
                echo -e " ${variables[$i]}_${indices[$i]}\t  ${absoluteValue}\t  ${relativeValue}" | expand -t $tabseq # list matches tabs above
 
                # Also log to metrics file
-               echo "test_ukko{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"absolute\"} $absoluteValue" >> $GITHUB_WORKSPACE/metrics.txt
-               echo "test_ukko{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"relative\"} $relativeValue" >> $GITHUB_WORKSPACE/metrics.txt
+               echo "test_turso_v100{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"absolute\"} $absoluteValue" >> $GITHUB_WORKSPACE/metrics.txt
+               echo "test_turso_v100{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"relative\"} $relativeValue" >> $GITHUB_WORKSPACE/metrics.txt
 
                # Check if we have a new maximum error
                if (( $( echo "$absoluteValue $MAXERR" | awk '{ if($1 > $2) print 1; else print 0 }' ) )); then
@@ -265,14 +303,19 @@ for run in ${run_tests[*]}; do
            elif [ ! "${variables[$i]}" == "proton" ]
            then # Regular vg_ variable
                C=$( $run_command_tools $diffbin ${reference_result_dir}/${vlsv} ${vlsv_dir}/${vlsv} ${variables[$i]} ${indices[$i]} )
+               if [[ ! $? -eq 0 ]]; then
+                  RUN_ERROR=1
+                  touch $GITHUB_WORKSPACE/testpackage_failed
+               fi
+               dt=$(grep "The delta t between both datasets is" <<< "$C" | gawk '{print $8}'); timeDiff=${dt:-$timeDiff}
                relativeValue=$(grep "The relative 0-distance between both datasets" <<< $C |gawk '{print $8}'  )
                absoluteValue=$(grep "The absolute 0-distance between both datasets" <<< $C |gawk '{print $8}'  )
                #print the results
                echo -e " ${variables[$i]}_${indices[$i]}\t  ${absoluteValue}\t  ${relativeValue}" | expand -t $tabseq # list matches tabs above
 
                # Also log to metrics file
-               echo "test_ukko{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"absolute\"} $absoluteValue" >> $GITHUB_WORKSPACE/metrics.txt
-               echo "test_ukko{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"relative\"} $relativeValue" >> $GITHUB_WORKSPACE/metrics.txt
+               echo "test_turso_v100{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"absolute\"} $absoluteValue" >> $GITHUB_WORKSPACE/metrics.txt
+               echo "test_turso_v100{test=\"${test_name[$run]}\",var=\"${variables[$i]}\",index=\"${indices[$i]}\",diff=\"relative\"} $relativeValue" >> $GITHUB_WORKSPACE/metrics.txt
 
                # Check if we have a new maximum error
                if (( $( echo "$absoluteValue $MAXERR" | awk '{ if($1 > $2) print 1; else print 0 }' ) )); then
@@ -291,18 +334,23 @@ for run in ${run_tests[*]}; do
                echo "Distribution function diff"
                # Exclude file names from output to keep report size down
                D=$( $run_command_tools $diffbin ${reference_result_dir}/${vlsv} ${vlsv_dir}/${vlsv} proton 0 | grep -v -e "File" -e "INFO" )
+               if [[ ! $? -eq 0 ]]; then
+                  RUN_ERROR=1
+                  touch $GITHUB_WORKSPACE/testpackage_failed
+               fi
                echo -e "$D"
            fi
 
        done # loop over variables
 
        # Check if dt is nonzero
-       timeDiff=$(grep "delta t" <<< $C |gawk '{print $8}'  )
        if [ -z $timeDiff ]; then
            echo "VLSV timesteps not tested."
-       elif (( $(awk 'BEGIN{print ('$timeDiff'!= 0.0)?1:0}') )); then
-           if (( $( echo "${timeDiff#-} $MAXDT" | awk '{ if($1 > $2) print 1; else print 0 }' ) )); then
-               MAXDT=$timeDiff
+       elif [[ $timeDiff != 0 && $timeDiff != -0 ]]; then # iostream prints an exact zero as 0 or -0; nan counts as differing
+           if [[ $timeDiff == *nan* || $MAXDT == nan ]]; then
+               MAXDT=nan # awk cannot order nan, so keep it explicitly as the largest difference
+           elif (( $( echo "${timeDiff#-} $MAXDT" | awk '{ if($1 > $2) print 1; else print 0 }' ) )); then
+               MAXDT=${timeDiff#-} # magnitude: the summary only flags MAXDT > 0
            fi
            echo "WARNING! VLSV file timestamps differ by ${timeDiff}s."
        else
@@ -347,7 +395,7 @@ for run in ${run_tests[*]}; do
    if [[ $COMPAREDFILES -ne $TOCOMPAREFILES ]]; then
       echo -e "<details><summary>:red_square: ${test_name[$run]}: Comparison failure, accessed \`$COMPAREDFILES\` out of \`$TOCOMPAREFILES\` files: \`$MAXERRVAR\` has absolute error $MAXERR, \`$MAXRELVAR\` has relative error $MAXREL. Max timestamp difference is $MAXDT.   Speedup: $speedup</summary>\n" >> $GITHUB_STEP_SUMMARY
       NONZEROTESTS=$((NONZEROTESTS+1))
-   elif (( $( echo "$MAXERR 0." | awk '{ if($1 > $2) print 1; else print 0 }' ) )) || (( $( echo "$MAXDT 0." | awk '{ if($1 > $2) print 1; else print 0 }' ) )); then
+   elif (( $( echo "$MAXERR 0." | awk '{ if($1 > $2) print 1; else print 0 }' ) )) || [[ $MAXDT == nan ]] || (( $( echo "$MAXDT 0." | awk '{ if($1 > $2) print 1; else print 0 }' ) )); then
       echo -e "<details><summary>:large_orange_diamond: ${test_name[$run]}: Nonzero diffs: \`$MAXERRVAR\` has absolute error $MAXERR, \`$MAXRELVAR\` has relative error $MAXREL. Max timestamp difference is $MAXDT.   Speedup: $speedup</summary>\n" >> $GITHUB_STEP_SUMMARY
       NONZEROTESTS=$((NONZEROTESTS+1))
    else
@@ -356,9 +404,9 @@ for run in ${run_tests[*]}; do
    fi
 
    echo -e "Stdout:\n \`\`\`\n" >> $GITHUB_STEP_SUMMARY
-   cat $GITHUB_WORKSPACE/stdout.txt >> $GITHUB_STEP_SUMMARY
+   summary_log stdout $summary_stdout_bytes ${test_name[$run]} >> $GITHUB_STEP_SUMMARY
    echo -e "\`\`\`\nStderr:\n \`\`\`\n" >> $GITHUB_STEP_SUMMARY
-   cat $GITHUB_WORKSPACE/stderr.txt >> $GITHUB_STEP_SUMMARY
+   summary_log stderr $summary_stderr_bytes ${test_name[$run]} >> $GITHUB_STEP_SUMMARY
    echo -e "\`\`\`\n</details>" >> $GITHUB_STEP_SUMMARY
 
    # -------- Generate JUnit output ----------
@@ -369,13 +417,13 @@ for run in ${run_tests[*]}; do
 HEADER
 if [[ $RUN_ERROR == 0 ]]; then
    cat >> $JUNIT_FILE <<HEADER
-   <testsuite name="Testpackage on ukko" tests="1" errors="0">
-      <testcase classname="vlasiator_ukko.${test_name[$run]}" name="${test_name[$run]}" time="$newPerf">
+   <testsuite name="Testpackage on turso-v100" tests="1" errors="0">
+      <testcase classname="vlasiator_turso_v100.${test_name[$run]}" name="${test_name[$run]}" time="$newPerf">
 HEADER
 else
    cat >> $JUNIT_FILE <<HEADER
    <testsuite name="Vlasiator testpackage" tests="1" errors="1">
-      <testcase classname="vlasiator_ukko.${test_name[$run]}" name="${test_name[$run]}" time="$newPerf">
+      <testcase classname="vlasiator_turso_v100.${test_name[$run]}" name="${test_name[$run]}" time="$newPerf">
          <error message="Running test failed">The test failed to run. Stdout was:
 
 HEADER

@@ -253,8 +253,10 @@ int simulate(int argn,char* args[]) {
    #ifdef CATCH_FPE
    // WARNING FE_INEXACT is too sensitive to be used. See man fenv.
    //feenableexcept(FE_DIVBYZERO|FE_INVALID|FE_OVERFLOW|FE_UNDERFLOW);
-   feenableexcept(FE_DIVBYZERO|FE_INVALID|FE_OVERFLOW);
    //feenableexcept(FE_DIVBYZERO|FE_INVALID);
+   //Make sure we set that on every thread that got started in the pool that phiprof::initialize just created
+   #pragma omp parallel
+   feenableexcept(FE_DIVBYZERO|FE_INVALID|FE_OVERFLOW);
    signal(SIGFPE, fpehandler);
    #endif
 
@@ -445,6 +447,7 @@ int simulate(int argn,char* args[]) {
 
    // Initialize simplified Fieldsolver grids.
    // Needs to be done here already ad the background field will be set right away, before going to initializeGrid even
+   phiprof::Timer initGridsTimer {"Init grids"};
    phiprof::Timer initFsTimer {"Init fieldsolver grids"};
 
    const std::array<fsgrid::FsSize_t, 3> fsGridDimensions = {
@@ -490,7 +493,7 @@ int simulate(int argn,char* args[]) {
    fsgrid::FsData<std::array<Real, fsgrids::dmoments::N_DMOMENTS>> dmomentsdt2(fsgridNumElements);
    fsgrid::FsData<std::array<Real, fsgrids::bgbfield::N_BGB>> bgb(fsgridNumElements);
    fsgrid::FsData<std::array<Real, fsgrids::volfields::N_VOL>> vol(fsgridNumElements);
-
+   initFsTimer.stop();
 
    // Initialize grid.  After initializeGrid local cells have dist
    // functions, and B fields set. Cells have also been classified for
@@ -498,7 +501,6 @@ int simulate(int argn,char* args[]) {
    // created. All spatial date computed this far is up to date for
    // FULL_NEIGHBORHOOD. Block lists up to date for
    // VLASOV_SOLVER_NEIGHBORHOOD (but dist function has not been communicated)
-   phiprof::Timer initGridsTimer {"Init grids"};
    dccrg::Dccrg<SpatialCell,dccrg::Cartesian_Geometry> mpiGrid;
 
    initializeGrids(
@@ -533,6 +535,8 @@ int simulate(int argn,char* args[]) {
    // because we need a copy of the value from initialization in both perBGrid and perBDt2Grid and it isn't
    // touched as we are in boundary cells for components that aren't solved. We do a straight full copy instead
    // of looping and detecting boundary types here.
+   initFsTimer.start();
+
    fsgrid::FsData<std::array<Real, fsgrids::bfield::N_BFIELD>> perbdt2(perb.view());
    // fieldSolverData not const as we need to update the spans for moments and momentsdt2 when filtering
    FieldSolverData fieldSolverData(
@@ -1469,7 +1473,7 @@ int main(int argn, char* args[]) {
    int required=MPI_THREAD_FUNNELED;
    int provided, resultlen;
    char mpiversion[MPI_MAX_LIBRARY_VERSION_STRING];
-   bool overrideMCAompio = false;
+   bool overrideMCAompio = false, bailMCA = false;
 
    MPI_Get_library_version(mpiversion, &resultlen);
    string versionstr = string(mpiversion);
@@ -1478,6 +1482,14 @@ int main(int argn, char* args[]) {
    if(versionstr.find("Open MPI") != std::string::npos) {
       #ifdef VLASIATOR_ALLOW_MCA_OMPIO
          mpiioMessage << "We detected OpenMPI but the compilation flag VLASIATOR_ALLOW_MCA_OMPIO was set so we do not override the default MCA io flag." << endl;
+         const char* mpiioenv = std::getenv("OMPI_MCA_io");
+         if(mpiioenv != nullptr) {
+            std::string mpiioenvstr(mpiioenv);
+            if(mpiioenvstr.find("^ompio") != std::string::npos) {
+               mpiioMessage << "However, the environment is setting OMPI_MCA_io=^ompio, which will likely not work! Please check your job script - you likely have a legacy `export OMPI_MCA_io=^ompio` somewhere. Aborting." <<endl;
+               bailMCA = true;
+            }
+         }
       #else
          overrideMCAompio = true;
          int index, count;
@@ -1509,6 +1521,10 @@ int main(int argn, char* args[]) {
          std::string mpiioenvstr(mpiioenv);
          if(mpiioenvstr.find("^ompio") == std::string::npos) {
             cout << mpiioMessage.str();
+         }
+         if(bailMCA){
+            cerr << mpiioMessage.str();
+            abort();
          }
       }
    }
