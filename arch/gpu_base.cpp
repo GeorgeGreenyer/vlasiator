@@ -42,6 +42,7 @@
 int gpuMultiProcessorCount = 0;
 int blocksPerMP = 0;
 int threadsPerMP = 0;
+int maxCellsPerIteration = 65535;
 
 extern Logger logFile;
 int myDevice;
@@ -296,7 +297,7 @@ int gpu_reportMemory(const size_t local_cells_capacity, const size_t ghost_cells
    */
    uint maxNThreads = gpu_getMaxThreads();
 
-   size_t miniBuffers = 
+   size_t miniBuffers =
       sizeof(std::array<vmesh::MeshParameters,MAX_VMESH_PARAMETERS_COUNT>) // velocityMeshes_upload
       + sizeof(vmesh::MeshWrapper); // MWdev
    // DT reduction buffers are deallocated every step (GPUTODO, make persistent)
@@ -365,7 +366,7 @@ __host__ void gpu_vlasov_allocate(
    ) {
    // Always prepare for at least VLASOV_BUFFER_MINBLOCKS blocks
    const uint maxBlocksPerCell = max(VLASOV_BUFFER_MINBLOCKS, maxBlockCount);
-   
+
    CREATE_UNIQUE_POINTER(gpuMemoryManager, host_blockDataOrdered);
    CREATE_UNIQUE_POINTER(gpuMemoryManager, dev_blockDataOrdered);
    ALLOCATE_GPU(gpuMemoryManager, dev_blockDataOrdered, allocationCount*sizeof(Realf*));
@@ -389,7 +390,7 @@ __host__ void gpu_calculateProbeAllocation(
    ) {
    // Always prepare for at least VLASOV_BUFFER_MINBLOCKS blocks
    const uint maxBlocksPerCell = max(VLASOV_BUFFER_MINBLOCKS, maxBlockCount);
-   
+
    // Evaluate required size for acceleration probe cube (based on largest population)
    for (uint popID=0; popID<getObjectWrapper().particleSpecies.size(); ++popID) {
       const uint c0 = (*vmesh::getMeshWrapper()->velocityMeshes)[popID].gridLength[0];
@@ -598,8 +599,9 @@ __host__ void gpu_acc_allocate_perthread(
    //value is nonzero, in which case it is the column allocation count
    uint columnSetAllocationCount
    ) {
+   const bool exactCounts = (columnSetAllocationCount != 0);
    uint columnAllocationCount;
-   if (columnSetAllocationCount==0) {
+   if (!exactCounts) {
       /*
         Estimate column count from maxblockcount, non-critical if ends up being too small.
         This makes a rough guess that we have a cubic velocity space domain, and thus one edge
@@ -619,9 +621,14 @@ __host__ void gpu_acc_allocate_perthread(
 
    // columndata contains several splitvectors. columnData is host/device, but splitvector contents are unified.
    gpuStream_t stream = gpu_getStream();
-   // Reallocate if necessary
-   if ( (columnAllocationCount > host_columnOffsetData[allocID].capacityCols()) ||
-        (columnSetAllocationCount > host_columnOffsetData[allocID].capacityColSets()) ) {
+   if (exactCounts) {
+      // scan_probe skipped device_setSizes for this cell, and the column extent and acceleration
+      // kernels take the set count from setColumnOffsets.size(): padded sizes make them run stale sets.
+      host_columnOffsetData[allocID].setCapacities(columnAllocationCount*BLOCK_ALLOCATION_PADDING, columnSetAllocationCount*BLOCK_ALLOCATION_PADDING);
+      host_columnOffsetData[allocID].setSizes(columnAllocationCount, columnSetAllocationCount);
+      CHK_ERR( gpuMemcpyAsync(GET_POINTER(gpuMemoryManager, ColumnOffsets, dev_columnOffsetData)+allocID, host_columnOffsetData+allocID, sizeof(ColumnOffsets), gpuMemcpyHostToDevice, stream));
+   } else if ( (columnAllocationCount > host_columnOffsetData[allocID].capacityCols()) ||
+               (columnSetAllocationCount > host_columnOffsetData[allocID].capacityColSets()) ) {
       // Also set size to match input
       host_columnOffsetData[allocID].setSizes(columnAllocationCount*BLOCK_ALLOCATION_PADDING, columnSetAllocationCount*BLOCK_ALLOCATION_PADDING);
       CHK_ERR( gpuMemcpyAsync(GET_POINTER(gpuMemoryManager, ColumnOffsets, dev_columnOffsetData)+allocID, host_columnOffsetData+allocID, sizeof(ColumnOffsets), gpuMemcpyHostToDevice, stream));
@@ -650,7 +657,7 @@ __host__ void gpu_trans_allocate(
          // New allocation
          void *buf0 = malloc(sizeof(Hashinator::Hashmap<vmesh::GlobalID,vmesh::LocalID>));
          unionOfBlocksSet = ::new (buf0) Hashinator::Hashmap<vmesh::GlobalID,vmesh::LocalID>(HashmapReqSize);
-         dev_unionOfBlocksSet = unionOfBlocksSet->upload<true>(stream); // <true> == optimize to GPU
+         dev_unionOfBlocksSet = unionOfBlocksSet->upload<false>(stream); // <true> == optimize to GPU
          gpu_allocated_largestVmeshSizePower = HashmapReqSize;
       } else {
          // Ensure allocation
@@ -658,7 +665,7 @@ __host__ void gpu_trans_allocate(
             ::delete unionOfBlocksSet;
             void *buf0 = malloc(sizeof(Hashinator::Hashmap<vmesh::GlobalID,vmesh::LocalID>));
             unionOfBlocksSet = ::new (buf0) Hashinator::Hashmap<vmesh::GlobalID,vmesh::LocalID>(HashmapReqSize);
-            dev_unionOfBlocksSet = unionOfBlocksSet->upload<true>(stream); // <true> == optimize to GPU
+            dev_unionOfBlocksSet = unionOfBlocksSet->upload<false>(stream); // <true> == optimize to GPU
             gpu_allocated_largestVmeshSizePower = HashmapReqSize;
          } else {
             // Ensure map is empty
@@ -674,13 +681,13 @@ __host__ void gpu_trans_allocate(
          unionOfBlocks = ::new (buf0) split::SplitVector<vmesh::GlobalID>(unionSetSize);
          unionOfBlocks->clear();
          //unionOfBlocks->optimizeGPU(stream);
-         dev_unionOfBlocks = unionOfBlocks->upload<true>(stream); // <true> == optimize to GPU
+         dev_unionOfBlocks = unionOfBlocks->upload<false>(stream); // <true> == optimize to GPU
       } else {
          // Clear is enough
          unionOfBlocks->clear();
          unionOfBlocks->reserve(unionSetSize);
          //unionOfBlocks->optimizeGPU(stream);
-         dev_unionOfBlocks = unionOfBlocks->upload<true>(stream); // <true> == optimize to GPU
+         dev_unionOfBlocks = unionOfBlocks->upload<false>(stream); // <true> == optimize to GPU
       }
       gpu_allocated_unionSetSize = unionSetSize;
    }
@@ -691,11 +698,13 @@ __host__ void gpu_trans_allocate(
 __host__ void gpu_trans_deallocate() {
    // Deallocate any translation vectors or sets which exist
    if (gpu_allocated_largestVmeshSizePower != 0) {
-      ::delete unionOfBlocksSet;
+      unionOfBlocksSet->~Hashmap();
+      free(unionOfBlocksSet);
       gpu_allocated_largestVmeshSizePower = 0;
    }
    if (gpu_allocated_unionSetSize != 0) {
-      ::delete unionOfBlocks;
+      unionOfBlocks->~SplitVector();
+      free(unionOfBlocks);
       gpu_allocated_unionSetSize = 0;
    }
 }
