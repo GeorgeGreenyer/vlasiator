@@ -251,6 +251,7 @@ P::ASTERIX_COMPRESSION_METHODS P::vdf_compression_method;
 std::size_t P::max_vdfs_per_nn;
 
 Real P::shellRadius =0.0;
+std::string P::shellProfile = "";
 
 
 bool P::addParameters() {
