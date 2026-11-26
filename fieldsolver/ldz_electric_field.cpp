@@ -354,14 +354,20 @@ Limits getRhomLimits(const std::array<std::array<Real, fsgrids::moments::N_MOMEN
    };
 }
 
+/*!< GG24.11.26 return profile int based on cell position.
+* Do we even need this? Checking position twice is slower, but might give us more information for debug
+*/
 int pickProfile(const Real position){
-   //GG27.10.26 return profile(resistivity, x,y,z,rhoq,mu_0,shellRadius, position, dperb, indices, spacing)
-   //This is the fastest way to do this (see time_trials)
    const Real resShellRadius = Parameters::shellRadius;
    int profile_case =0;
    if(position<=resShellRadius){
       //Add named profiles eg "tapered", "uniform" in parameters?
-      profile_case=1;
+      profile_case=1;   //Sets to numerical_max which is uniform
+      if(Parameters::shellProfile =="inverseRCubed"){
+         profile_case = 2; //GG26.11.26 This one is not in the tests yet, watch out in configs
+      }
+
+      
 
    }
    return profile_case;
@@ -388,6 +394,12 @@ Real resistiveTerm(const auto& bgb, const auto& perb, const auto& dperb, Real rh
       return std::numeric_limits<Real>::max();
       //something ridiculous for now, and leaving this elif open so that we can add more profiles later
    }
+   else if (pickProfile(position)==2)
+   {//GG19.11.26 This one is not in the LUMI/Turso tests yet nor on git
+      return Parameters::resistivity/(position*position*position);
+      //silly but I need a different shape to test
+   }
+
    else{
       std::cout<<"[CRITICAL] ldz_electric_field.cpp unknown and/or untested profile case for resistivity. Waaaaaa"<<std::endl;
       std::abort();
